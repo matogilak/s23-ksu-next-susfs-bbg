@@ -1,0 +1,104 @@
+name: Build ksu-manager (pinned)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build (SHA/branch/tag)"
+        required: true
+        default: "84dee43"
+      buildType:
+        description: "Debug or Release"
+        type: choice
+        options: [debug, release]
+        default: release
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      BUILD_TYPE: ${{ inputs.buildType || 'release' }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Pin to requested ref
+        run: |
+          git checkout "${{ inputs.ref || '84dee43' }}"
+          git rev-parse --short HEAD
+          git log -1 --pretty=oneline
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      # Installs Android cmdline tools and accepts licenses.
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # Fast, reliable Gradle caching
+      - name: Gradle cache
+        uses: gradle/gradle-build-action@v3
+
+      - name: Make Gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      - name: Build APK
+        run: |
+          ./gradlew --no-daemon --stacktrace clean \
+            "assemble${BUILD_TYPE^}"
+
+      - name: Locate APKs
+        id: apk
+        run: |
+          echo "files<<EOF" >> $GITHUB_OUTPUT
+          find . -type f -path "*/build/outputs/apk/*/*.apk" -print >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          printf "Discovered APKs:\n%s\n" "${{ steps.apk.outputs.files }}"
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ksu-manager-${{ github.run_id }}-${{ inputs.buildType || 'release' }}
+          path: |
+            **/build/outputs/apk/*/*.apk
+          if-no-files-found: error
+
+      # Optional: verify versionName/versionCode printed from AAB/APK (if the module is "app")
+      - name: Print version info (best-effort)
+        run: |
+          ./gradlew --no-daemon :app:androidDependencies || true
+          ./gradlew --no-daemon :app:tasks || true
+
+      # -------- OPTIONAL SIGNING (uncomment and configure if you want signed release) --------
+      # 1) Add repo secrets: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+      #    ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+      # 2) Add signingConfig release in app/build.gradle reading those envs or gradle.properties.
+      #
+      # - name: Decode keystore
+      #   if: ${{ env.BUILD_TYPE == 'release' }}
+      #   run: |
+      #     echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > keystore.jks
+      #   env:
+      #     ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      #
+      # - name: Build signed Release
+      #   if: ${{ env.BUILD_TYPE == 'release' }}
+      #   env:
+      #     ANDROID_KEYSTORE: keystore.jks
+      #     ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      #     ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      #     ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      #   run: |
+      #     ./gradlew --no-daemon --stacktrace clean assembleRelease
