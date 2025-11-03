@@ -50,8 +50,7 @@ jobs:
           # Compute version code = commit count + 10200 (same scheme as KernelSU CI)
           COMMITS="$(git -C "./Wild_KSU" rev-list --count HEAD || echo 0)"
           WILD_VER_CODE=$((10200 + COMMITS))
-          echo "WILD_VER_CODE=$WILD_VER_CODE" >> "$GITHUB_ENV"
-          mv Wild_KSU/ KernelSU-Next/     
+          echo "WILD_VER_CODE=$WILD_VER_CODE" >> "$GITHUB_ENV"              
           
           # Integrate latest SUSFS
           git clone -b gki-android13-5.15 --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
@@ -65,9 +64,11 @@ jobs:
           cd ..
 
           # Begin susfs patching
+          [ -d Wild_KSU ] && mv -f Wild_KSU KernelSU-Next
           cp -rv ./susfs4ksu/kernel_patches/fs/* fs/
           cp -rv ./susfs4ksu/kernel_patches/include/linux/* include/linux/
           patch -p1 --fuzz=3 < "${GITHUB_WORKSPACE}/rezoss_susfs1512.patch"
+          [ -d KernelSU-Next ] && mv -f KernelSU-Next Wild_KSU
           
           # Integrate scope-minimized manual KernelSU hooks via a patch
           curl -L -o manual-hook.patch https://github.com/WildKernels/kernel_patches/raw/f2227a36f02adf3776fc9d432734faf04787f3fa/next/scope_min_manual_hooks_v1.4.patch
